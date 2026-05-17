@@ -1,5 +1,5 @@
 1:"$Sreact.fragment"
-2:I[56119,["/TravelTracker/_next/static/chunks/056wtwqx.w9m6.js","/TravelTracker/_next/static/chunks/0t-vhh08qxp~u.js"],"default"]
-3:I[51400,["/TravelTracker/_next/static/chunks/056wtwqx.w9m6.js","/TravelTracker/_next/static/chunks/0t-vhh08qxp~u.js"],"default"]
+2:I[39756,["/_next/static/chunks/0dbhjjzl8qfwv.js"],"default"]
+3:I[37457,["/_next/static/chunks/0dbhjjzl8qfwv.js"],"default"]
 4:[]
-0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"parallelRouterKey":"children","template":["$","$L3",null,{}]}]]}],"isPartial":false,"staleTime":300,"varyParams":"$W4","buildId":"VKnKNkxt1gl3qJ1SjXzXy"}
+0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"parallelRouterKey":"children","template":["$","$L3",null,{}]}]]}],"isPartial":false,"staleTime":300,"varyParams":"$W4","buildId":"VGO4Y6behePFBSd3YJYeQ"}
