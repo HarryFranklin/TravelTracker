@@ -61,10 +61,6 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
       .trim();
   };
 
-  const isUnifiedRegion = (adminName: string): boolean => {
-    return adminName === 'Israel' || adminName === 'West Bank' || adminName === 'Gaza' || adminName === 'Gaza Strip' || adminName === 'Palestine';
-  };
-
   const getAdaptiveLabelMetrics = (fullName: string, bbox: number[], currentAltitude: number, dot: number): { text: string; size: number; opacity: number } => {
     let name = fullName.toUpperCase();
     
@@ -105,38 +101,40 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
     fetch('https://raw.githubusercontent.com/vasturiano/react-globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
       .then(res => res.json())
       .then(data => {
-        const structuralRegionalRings: any[] = [];
-        
-        const standardFeatures = data.features.filter((f: any) => {
+        let largestUnifiedFeature: any = null;
+        let maxArea = -1;
+
+        data.features.forEach((f: any) => {
           const name = f.properties.ADMIN;
-          if (isUnifiedRegion(name)) {
-            if (f.geometry.type === 'Polygon') {
-              structuralRegionalRings.push(f.geometry.coordinates);
-            } else if (f.geometry.type === 'MultiPolygon') {
-              f.geometry.coordinates.forEach((rings: any) => structuralRegionalRings.push(rings));
+          if (['Israel', 'West Bank', 'Gaza', 'Gaza Strip', 'Palestine'].includes(name)) {
+            const coordsLength = JSON.stringify(f.geometry.coordinates).length;
+            if (coordsLength > maxArea) {
+              maxArea = coordsLength;
+              largestUnifiedFeature = f;
             }
-            return false; 
           }
-          return true;
         });
 
-        if (structuralRegionalRings.length > 0) {
-          standardFeatures.push({
-            type: "Feature",
-            geometry: {
-              type: "MultiPolygon",
-              coordinates: structuralRegionalRings
-            },
-            properties: {
-              ADMIN: "Palestine",
-              NAME: "Palestine",
-              ISO_A3: "PSE",
-              BBOX: [34.2, 31.2, 35.6, 33.3],
-              LABEL_X: 35.15,
-              LABEL_Y: 31.90
-            }
-          });
-        }
+        const standardFeatures = data.features.filter((f: any) => {
+          const name = f.properties.ADMIN;
+          if (['Israel', 'West Bank', 'Gaza', 'Gaza Strip', 'Palestine'].includes(name)) {
+            return f === largestUnifiedFeature; 
+          }
+          return true;
+        }).map((f: any) => {
+          if (f === largestUnifiedFeature) {
+            return {
+              ...f,
+              properties: {
+                ...f.properties,
+                ADMIN: "Palestine",
+                NAME: "Palestine",
+                ISO_A3: "PSE"
+              }
+            };
+          }
+          return f;
+        });
 
         setCountries({ ...data, features: standardFeatures });
       });
@@ -150,26 +148,25 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
             if (!coords || (coords[0] === 0 && coords[1] === 0)) return false;
             return f.properties.featurecla === 'Admin-0 capital' || f.properties.featurecla === 'Admin-0 capital alt';
           })
-          .map((f: any) => ({
-            lat: f.geometry.coordinates[1],
-            lng: f.geometry.coordinates[0],
-            text: sanitizeNameText(f.properties.name),
-            type: 'city'
-          }));
+          .map((f: any) => {
+            let lat = f.geometry.coordinates[1];
+            let lng = f.geometry.coordinates[0];
+            let text = sanitizeNameText(f.properties.name);
+
+            if (text.toUpperCase() === "TEL AVIV-YAFO" || text.toUpperCase() === "TEL AVIV" || text.toUpperCase() === "JAFFA") {
+              text = "Jaffa";
+              lat = 31.95; 
+              lng = 35.05; 
+            }
+
+            return { lat, lng, text, type: 'city' };
+          });
         setCapitals(parsedCapitals);
       });
   }, []);
 
-  const getVectorFromCoords = (lat: number, lng: number) => {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
-    return new THREE.Vector3(
-      -(Math.sin(phi) * Math.sin(theta)),
-      Math.cos(phi),
-      -(Math.sin(phi) * Math.cos(theta))
-    ).normalize();
-  };
-
+  // THE ALIGNMENT FIX: Removed the manual mathematical vector generation entirely. 
+  // We will now pull coordinates natively from the globe engine inside the render loop.
   const labelDatabase = useMemo(() => {
     const results: any[] = [];
     const addedCountries = new Set<string>();
@@ -195,7 +192,6 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
 
       results.push({
         lat, lng,
-        vec: getVectorFromCoords(lat, lng),
         name: countryKey,
         bbox,
         type: 'country'
@@ -206,7 +202,6 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
       results.push({
         lat: cap.lat,
         lng: cap.lng,
-        vec: getVectorFromCoords(cap.lat, cap.lng),
         name: cap.text,
         bbox: [],
         type: 'city'
@@ -250,12 +245,17 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
           const tempV = new THREE.Vector3();
 
           labelDatabase.forEach(d => {
-            const dot = (d.vec.x * outwardLensVec.x) + (d.vec.y * outwardLensVec.y) + (d.vec.z * outwardLensVec.z);
+            // THE ALIGNMENT FIX: Query the engine for the exact spatial coordinates.
+            // Altitude is matched to 0.02 to sit perfectly flush against the green terrain polygons.
+            const globeEngineCoords = globeRef.current!.getCoords(d.lat, d.lng, 0.02);
+            tempV.set(globeEngineCoords.x, globeEngineCoords.y, globeEngineCoords.z);
+
+            const normal = tempV.clone().normalize();
+            const dot = normal.dot(outwardLensVec);
             if (dot < FOCAL_RING_LIMIT) return;
 
             if (d.type === 'city' && (pov.altitude > 1.3 || dot < 0.94)) return;
 
-            tempV.copy(d.vec).multiplyScalar(100);
             tempV.project(camera);
 
             const screenX = (tempV.x * widthHalf) + widthHalf;
@@ -352,7 +352,6 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
         globeImageUrl={null}   
         globeMaterial={oceanMaterial}
 
-        // --- POLYGONS LAYER ---
         polygonsData={countries.features}
         polygonsTransitionDuration={0} 
         
@@ -373,15 +372,13 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
         }}
         polygonSideColor={() => '#2d4026'} 
         
-        // THE PERIMETER BORDER FIX: Strips out the internal dividing lines 
-        // while cleanly maintaining the outer international boundary lines.
         polygonStrokeColor={(f: any) => {
           const feature = f as CountryFeature;
           const name = feature.properties.ADMIN;
+          const isHovered = hoverD && (feature === hoverD || hoverD.properties.ADMIN === name);
           
-          // If it matches our integrated block, draw the crisp standard boundary color
           if (name === "Palestine") {
-            return '#174a97'; 
+            return isHovered ? '#6b8e5c' : '#4f6d46'; 
           }
           return '#174a97'; 
         }}
@@ -395,7 +392,6 @@ export default function EarthGlobe({ locations, autoRotate, onGlobeClick, onMark
             onGlobeClick({ lat: clickObj.lat, lng: clickObj.lng }, "Ocean / International Waters");
         }}
 
-        // --- USER PIN LAYER ---
         labelsData={locations}
         labelLat={(d: any) => d.lat}
         labelLng={(d: any) => d.lng}
